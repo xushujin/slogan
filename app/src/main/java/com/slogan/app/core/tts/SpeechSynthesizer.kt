@@ -41,6 +41,10 @@ class SpeechSynthesizer(context: Context) {
     @Volatile
     private var initSignal: CompletableDeferred<Boolean>? = null
 
+    /** 当前正在合成的音色（用于错误提示），合成结束后清空。 */
+    @Volatile
+    private var activeVoiceLabel: String? = null
+
     /** 默认引擎包名，用于让缓存随引擎切换而失效。 */
     suspend fun engineSignature(): String = obtainEngine()?.defaultEngine ?: "unknown"
 
@@ -55,7 +59,12 @@ class SpeechSynthesizer(context: Context) {
             .map { voice ->
                 VoiceOption(
                     name = voice.name,
-                    label = "${voice.locale.displayName} · ${voice.name.substringAfterLast('/')}",
+                    label = buildString {
+                        append(voice.locale.displayName)
+                        append(" · ")
+                        append(voice.name.substringAfterLast('/'))
+                        if (voice.isNetworkConnectionRequired) append("（需联网）")
+                    },
                     localeTag = voice.locale.toLanguageTag(),
                     requiresNetwork = voice.isNetworkConnectionRequired,
                 )
@@ -67,8 +76,20 @@ class SpeechSynthesizer(context: Context) {
         val tts = obtainEngine() ?: throw SpeechSynthesisException(
             "系统语音引擎不可用。请先在系统设置中安装并启用「文字转语音」引擎。",
         )
+        val voiceLabel = request.voiceName?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
         withContext(Dispatchers.Main.immediate) {
-            applyVoice(tts, request.voiceName)
+            val applied = applyVoice(tts, request.voiceName)
+            // 中文文本配非中文音色，很多引擎会直接报错，个别厂商引擎甚至会在原生层崩掉。
+            // 与其把中文丢给英文音色，不如在合成前就给出可执行的提示。
+            if (applied != null &&
+                applied.locale.language != TextScript.CHINESE_LANGUAGE &&
+                TextScript.containsChinese(request.text)
+            ) {
+                throw SpeechSynthesisException(
+                    "音色「${applied.name.substringAfterLast('/')}」不是中文音色，无法朗读中文。" +
+                        "请改用中文音色或「系统默认」。",
+                )
+            }
             tts.setSpeechRate(request.speechRate.coerceIn(0.5f, 2.0f))
             tts.setPitch(request.pitch.coerceIn(0.5f, 2.0f))
 
@@ -80,10 +101,12 @@ class SpeechSynthesizer(context: Context) {
             val utteranceId = "slogan-${utteranceCounter.incrementAndGet()}"
             val signal = CompletableDeferred<Unit>()
             pendingUtterances[utteranceId] = signal
+            activeVoiceLabel = voiceLabel
             val started = tts.synthesizeToFile(request.text, Bundle.EMPTY, target, utteranceId)
             if (started != TextToSpeech.SUCCESS) {
                 pendingUtterances.remove(utteranceId)
-                throw SpeechSynthesisException("语音引擎拒绝了合成请求（错误码 $started）")
+                activeVoiceLabel = null
+                throw SpeechSynthesisException("语音引擎拒绝了合成请求（错误码 $started）$voiceHint")
             }
 
             try {
@@ -98,12 +121,13 @@ class SpeechSynthesizer(context: Context) {
                     }
                 }
                 when {
-                    finished == null -> throw SpeechSynthesisException("语音合成超时，请检查系统语音引擎")
+                    finished == null -> throw SpeechSynthesisException("语音合成超时$voiceHint")
                     finished.isFailure -> throw finished.exceptionOrNull()
-                        ?: SpeechSynthesisException("语音合成失败")
+                        ?: SpeechSynthesisException("语音合成失败$voiceHint")
                 }
             } finally {
                 pendingUtterances.remove(utteranceId)
+                activeVoiceLabel = null
             }
         }
     }
@@ -154,7 +178,7 @@ class SpeechSynthesizer(context: Context) {
                     override fun onError(utteranceId: String?) {
                         utteranceId?.let {
                             pendingUtterances.remove(it)?.completeExceptionally(
-                                SpeechSynthesisException("语音合成失败，请更换音色后重试"),
+                                SpeechSynthesisException("语音合成失败$voiceHint"),
                             )
                         }
                     }
@@ -162,7 +186,7 @@ class SpeechSynthesizer(context: Context) {
                     override fun onError(utteranceId: String?, errorCode: Int) {
                         utteranceId?.let {
                             pendingUtterances.remove(it)?.completeExceptionally(
-                                SpeechSynthesisException("语音合成失败（错误码 $errorCode）"),
+                                SpeechSynthesisException("语音合成失败（错误码 $errorCode）$voiceHint"),
                             )
                         }
                     }
@@ -181,14 +205,51 @@ class SpeechSynthesizer(context: Context) {
         }
     }
 
-    private fun applyVoice(tts: TextToSpeech, voiceName: String?) {
+    /**
+     * 应用音色，返回实际生效的音色（系统默认时返回引擎默认音色）。
+     *
+     * **不能**用 `tts.voice = null` 表示「系统默认」：平台实现里 `setVoice` 会直接
+     * 对传入对象调用 `voice.getName()`，传 null 必然抛 NPE。要回到默认音色，
+     * 必须显式设置引擎给出的 `defaultVoice`。
+     *
+     * 设置结果也不再静默吞掉——`setVoice` 返回非 SUCCESS 时抛错，
+     * 否则会出现「选了音色但听起来没变」却毫无提示的情况。
+     */
+    private fun applyVoice(tts: TextToSpeech, voiceName: String?): Voice? {
+        val voices = runCatching { tts.voices }.getOrNull()
+
         if (voiceName.isNullOrBlank()) {
-            tts.voice = null
-            return
+            val fallback = runCatching { tts.defaultVoice }.getOrNull() ?: return null
+            runCatching { tts.setVoice(fallback) }
+            return fallback
         }
-        val target = tts.voices?.firstOrNull { it.name == voiceName } ?: return
-        runCatching { tts.voice = target }
+
+        // 引擎尚未给出音色列表时不做判断，交给后续合成流程报错。
+        if (voices == null) return null
+
+        val target = voices.firstOrNull { it.name == voiceName }
+            ?: throw SpeechSynthesisException(
+                "系统里已找不到音色「${voiceName.substringAfterLast('/')}」，请重新选择",
+            )
+        val result = try {
+            tts.setVoice(target)
+        } catch (error: RuntimeException) {
+            throw SpeechSynthesisException(
+                "无法切换到音色「${target.name.substringAfterLast('/')}」",
+                error,
+            )
+        }
+        if (result != TextToSpeech.SUCCESS) {
+            throw SpeechSynthesisException(
+                "系统拒绝使用音色「${target.name.substringAfterLast('/')}」（错误码 $result）",
+            )
+        }
+        return target
     }
+
+    /** 非默认音色失败时补一句提示，避免用户对着英文音色反复试中文。 */
+    private val voiceHint: String
+        get() = activeVoiceLabel?.let { "。当前音色「$it」可能与文本语言不匹配，请换一个音色" }.orEmpty()
 
     private companion object {
         const val INIT_TIMEOUT_MS = 10_000L

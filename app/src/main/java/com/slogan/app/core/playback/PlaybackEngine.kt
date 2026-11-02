@@ -50,31 +50,45 @@ class PlaybackEngine(
 
     fun start(request: PlaybackRequest) {
         scope.launch {
-            controlMutex.withLock {
-                session?.cancelAndJoin()
-                session = null
-                player.release()
+            // 这个协程不在 runSession 的 try 里，任何异常都会直接冒到默认处理器把进程带走，
+            // 所以入口处必须自己兜住，转成可展示的失败状态。
+            try {
+                controlMutex.withLock {
+                    session?.cancelAndJoin()
+                    session = null
+                    player.release()
 
-                val settings = request.settings.normalized()
-                currentVolume = settings.volume
-                ducked = false
-                mutableState.value = PlaybackState.Preparing(request.title)
-                focusManager.request()
-                session = scope.launch { runSession(request.copy(settings = settings)) }
+                    val settings = request.settings.normalized()
+                    currentVolume = settings.volume
+                    ducked = false
+                    mutableState.value = PlaybackState.Preparing(request.title)
+                    focusManager.request()
+                    session = scope.launch { runSession(request.copy(settings = settings)) }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                mutableState.value = PlaybackState.Failed(error.message ?: "无法开始播放，请重试")
             }
         }
     }
 
     fun stop() {
         scope.launch {
-            controlMutex.withLock {
-                session?.cancelAndJoin()
-                session = null
-                player.release()
-                focusManager.abandon()
-                if (mutableState.value !is PlaybackState.Failed) {
-                    mutableState.value = PlaybackState.Idle
+            try {
+                controlMutex.withLock {
+                    session?.cancelAndJoin()
+                    session = null
+                    player.release()
+                    focusManager.abandon()
+                    if (mutableState.value !is PlaybackState.Failed) {
+                        mutableState.value = PlaybackState.Idle
+                    }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                mutableState.value = PlaybackState.Failed(error.message ?: "停止播放失败")
             }
         }
     }

@@ -52,6 +52,22 @@
 已知限制：debug 构建的包名是 `com.slogan.app.debug`、签名也是 debug key，
 因此**调试版无法通过应用内更新安装正式版**，校验会明确提示包名或签名不一致。
 
+### 音色与语言匹配
+
+系统 TTS 允许选择任意语言的音色，但用英文音色朗读中文时，多数引擎会直接报错，
+个别厂商引擎会在原生层崩溃（表现为「点开始播报就闪退」，Java 层拿不到堆栈）。
+因此在合成前做一次判定：
+
+| 处理 | 说明 |
+| --- | --- |
+| 中文文本 + 非中文音色 | 合成前直接拒绝，提示「请改用中文音色或系统默认」，不把中文交给英文引擎 |
+| 「系统默认」 | 不再用 `setVoice(null)` 表达——平台实现会对 null 调 `voice.getName()` 直接 NPE；改为显式设置引擎的 `defaultVoice` |
+| `setVoice` 返回值 | 不再被忽略。切换失败会明确报错，而不是静默沿用上一个音色 |
+| 音色列表 | 需联网的音色在名称后标注「（需联网）」 |
+
+其中「`setVoice` 返回值被忽略」正是「选了音色但听起来没变」的根因：
+旧实现用 `runCatching` 吞掉了失败，引擎回退到默认音色，界面却显示已选中。
+
 
 ### 关键设计约束的落实方式
 
@@ -130,7 +146,7 @@ libraries and applications that depend on it to compile against version 37 or la
 │       │   ├── playback/              # PlaybackService（前台服务）
 │       │   └── ui/                    # 主题、拟态组件、四个页面、ViewModel
 │       ├── main/res/                  # 图标、通知图标、主题、备份规则、FileProvider 路径
-│       └── test/                      # 61 个 JVM 单测 + 真实 WAV / GitHub Release 夹具
+│       └── test/                      # 67 个 JVM 单测 + 真实 WAV / GitHub Release 夹具
 ├── gradle/libs.versions.toml
 └── README.md
 ```
@@ -151,7 +167,7 @@ libraries and applications that depend on it to compile against version 37 or la
 # Debug
 ./gradlew :app:assembleDebug
 
-# 单元测试（61 个）
+# 单元测试（67 个）
 ./gradlew :app:testDebugUnitTest
 
 # Lint（warningsAsErrors = true）
@@ -342,7 +358,7 @@ base64 -w0 slogan-release.jks
 
 Lint 首轮发现 6 个 error（`UnusedAttribute`、`DataExtractionRules`、`ObsoleteSdkInt`、`MonochromeLauncherIcon` ×2、`UseKtx`），已逐项修复；`ObsoleteSdkInt` 因自适应图标必须放在 `mipmap-anydpi-v26` 而在 `app/lint.xml` 中定点忽略。
 
-### 8.2 单元测试（61 个，全部通过）
+### 8.2 单元测试（67 个，全部通过）
 
 | 测试类 | 数量 | 覆盖内容 |
 | --- | --- | --- |
@@ -355,6 +371,7 @@ Lint 首轮发现 6 个 error（`UnusedAttribute`、`DataExtractionRules`、`Obs
 | `GitHubReleaseParserTest` | 10 | 真实 Release 响应夹具、资产选择、digest 解析、缺附件/缺 APK/非法 JSON/坏版本号报错 |
 | `ApkVerifierTest` | 5 | 真实文件 SHA-256 与系统 `shasum` 一致、空文件标准值、校验和大小写无关 |
 | `UpdateStateTest` | 3 | 下载进度比例、总字节未知、超范围钳制 |
+| `TextScriptTest` | 6 | 中文判定：纯中文、中英混排、纯英文/数字、纯标点、扩展 A 区、语言常量 |
 
 ### 8.3 真实文件验证（WAV）
 
@@ -395,8 +412,10 @@ aapt2 dump xmltree --file AndroidManifest.xml app-release.apk
 
 | 项目 | 状态 |
 | --- | --- |
-| 真机/模拟器运行 | **未执行**。本机没有安装 Android Emulator 与系统镜像，也没有连接设备；UI 交互、TTS 实际发声、AudioTrack 循环、前台服务保活均未做端到端运行验证 |
-| CI 环境变量签名通道 | **未在本机执行**。本地只验证了 `keystore.properties` 通道；CI 通道代码路径相同，且 workflow 内强制 `apksigner verify`，首次打 tag 时会得到真实验证 |
+| 真机运行（基础播放） | **已由用户实机验证**：中文音色可正常循环播报。同时暴露并修复了两个问题——英文音色朗读中文导致闪退、切换音色听感不变（见「音色与语言匹配」） |
+| 真机运行（更新链路） | **未验证**。检查/下载/校验/安装只做了单测与二进制验证，尚未在真机走完整流程 |
+| 前台服务保活 / 锁屏循环 | **未验证**。取决于厂商后台策略，需要在真机上长时间息屏观察 |
+| CI 环境变量签名通道 | 已由两次真实发版验证（v1.0.0 / v1.1.0），`apksigner verify` 通过 |
 | 不同 TTS 引擎的 WAV 输出 | 仅支持 16 bit 线性 PCM WAV；若某引擎输出 float/8 bit/非 WAV，会抛出明确错误而不是静默播放失败 |
 | 实际扩音响度 | 取决于设备扬声器功率、系统音效与媒体音量，代码只保证不削顶、平均响度尽量高 |
 | 音频输出路由 | 走系统媒体通道；连接耳机/蓝牙时会从对应设备播放，不会强制切回扬声器（强制切换需要 `MODE_IN_COMMUNICATION`，会显著改变音质且难以在无设备环境下验证） |

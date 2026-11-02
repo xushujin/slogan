@@ -48,7 +48,11 @@ class PlaybackService : Service() {
         container = (application as SloganApp).container
         ensureChannel()
         stateJob = scope.launch {
-            container.playbackEngine.state.collect(::onStateChanged)
+            // 通知构建/更新属于「锦上添花」，它抛异常不该把整个进程带走。
+            container.playbackEngine.state.collect { state ->
+                runCatching { onStateChanged(state) }
+                    .onFailure { shutdownService() }
+            }
         }
     }
 

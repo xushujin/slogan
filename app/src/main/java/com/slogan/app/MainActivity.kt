@@ -153,7 +153,11 @@ private fun SloganRoot(state: SloganUiState, viewModel: SloganViewModel) {
                         RootTab.Presets -> PresetsScreen(
                             state = state,
                             onPlay = viewModel::playPreset,
-                            onLoad = viewModel::loadPreset,
+                            onLoad = { preset ->
+                                viewModel.loadPreset(preset)
+                                // 载入后直接回到播报页，否则用户看不到内容已被替换。
+                                tab = RootTab.Broadcast
+                            },
                             onDelete = viewModel::deletePreset,
                         )
 

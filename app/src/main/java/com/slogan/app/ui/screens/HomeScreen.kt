@@ -196,6 +196,16 @@ fun HomeScreen(
                     color = palette.textSecondary,
                     style = MaterialTheme.typography.bodyMedium,
                 )
+            } else {
+                val selectedVoice = state.voices.firstOrNull { it.name == settings.voiceName }
+                if (selectedVoice != null && !selectedVoice.localeTag.startsWith("zh", ignoreCase = true)) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "所选音色不是中文音色（${selectedVoice.localeTag}），朗读中文可能失败或发音不准。",
+                        color = palette.danger,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
             }
         }
 
