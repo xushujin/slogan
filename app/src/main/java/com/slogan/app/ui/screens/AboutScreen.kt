@@ -1,5 +1,6 @@
 package com.slogan.app.ui.screens
 
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +41,13 @@ import com.slogan.app.ui.theme.LocalSloganPalette
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
     val palette = LocalSloganPalette.current
+    val context = LocalContext.current
+    // 音色表现完全取决于引擎实现，把当前默认引擎显示出来便于排查
+    val engineName = remember {
+        runCatching {
+            Settings.Secure.getString(context.contentResolver, TTS_DEFAULT_SYNTH_KEY)
+        }.getOrNull()
+    }
 
     Column(
         modifier = Modifier
@@ -109,6 +117,7 @@ fun AboutScreen(onBack: () -> Unit) {
             InfoRow("语言", "Kotlin ${BuildConfig.KOTLIN_VERSION}")
             InfoRow("界面", "Jetpack Compose（BOM ${BuildConfig.COMPOSE_BOM_VERSION}）")
             InfoRow("语音合成", "系统 TextToSpeech · synthesizeToFile")
+            InfoRow("语音引擎", engineName ?: "未知")
             InfoRow("音频处理", "自研 WAV 编解码 · 峰值归一化 / 软限幅")
             InfoRow("播放", "AudioTrack 单实例循环，无第三方播放器")
             InfoRow("存储", "原生 SQLite，显式版本迁移")
@@ -176,7 +185,6 @@ fun AboutScreen(onBack: () -> Unit) {
             InfoRow("构建类型", BuildConfig.BUILD_TYPE)
         }
 
-        val context = LocalContext.current
         var crashRecord by remember { mutableStateOf(CrashRecorder.lastCrash(context)) }
         val record = crashRecord
         if (record != null) {
@@ -247,3 +255,6 @@ private fun PermissionRow(title: String, detail: String) {
         )
     }
 }
+
+/** `Settings.Secure` 里记录默认 TTS 引擎包名的键。SDK 未公开该常量，用字面值。 */
+private const val TTS_DEFAULT_SYNTH_KEY = "tts_default_synth"

@@ -116,6 +116,8 @@ class SpeechSynthesizer(context: Context) {
         pendingUtterances[utteranceId] = signal
         activeVoiceLabel = voiceLabel
         activeTextNeedsChinese = TextScript.containsChinese(request.text)
+        // 传空 Bundle 即可：setVoice 成功后音色已经写进 mParams，
+        // 平台会把 mParams 原样带给引擎，不需要（也没有公开常量能）再传一次。
         val started = tts.synthesizeToFile(request.text, Bundle.EMPTY, target, utteranceId)
         if (started != TextToSpeech.SUCCESS) {
             pendingUtterances.remove(utteranceId)
@@ -258,25 +260,29 @@ class SpeechSynthesizer(context: Context) {
     }
 
     private fun applyVoice(tts: TextToSpeech, voiceName: String) {
+        val label = voiceName.substringAfterLast('/')
         val voices = runCatching { tts.voices }.getOrNull()
-        // 引擎尚未给出音色列表时不做判断，交给后续合成流程报错。
-        if (voices == null) return
+            ?: throw SpeechSynthesisException("读取不到系统音色列表，请重启应用后再试")
 
         val target = voices.firstOrNull { it.name == voiceName }
-            ?: throw SpeechSynthesisException(
-                "系统里已找不到音色「${voiceName.substringAfterLast('/')}」，请重新选择",
-            )
+            ?: throw SpeechSynthesisException("系统里已找不到音色「$label」，请重新选择")
+
         val result = try {
             tts.setVoice(target)
         } catch (error: RuntimeException) {
-            throw SpeechSynthesisException(
-                "无法切换到音色「${target.name.substringAfterLast('/')}」",
-                error,
-            )
+            throw SpeechSynthesisException("无法切换到音色「$label」", error)
         }
         if (result != TextToSpeech.SUCCESS) {
+            throw SpeechSynthesisException("系统拒绝使用音色「$label」（错误码 $result）")
+        }
+
+        // setVoice 返回 SUCCESS 不代表真的换掉了。部分引擎会「收下请求但不动」，
+        // 结果就是界面显示已选中、听起来却还是同一个声音。这里回读一次戳穿它。
+        val applied = runCatching { tts.voice }.getOrNull()
+        if (applied != null && applied.name != target.name) {
             throw SpeechSynthesisException(
-                "系统拒绝使用音色「${target.name.substringAfterLast('/')}」（错误码 $result）",
+                "系统没有真正切换到音色「$label」，当前仍是「${applied.name.substringAfterLast('/')}」。" +
+                    "这台设备的语音引擎可能不支持多音色，请改用「系统默认」。",
             )
         }
     }

@@ -196,6 +196,13 @@ fun HomeScreen(
                     color = palette.textSecondary,
                     style = MaterialTheme.typography.bodyMedium,
                 )
+            } else {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "音色由系统「文字转语音」引擎提供。若切换后听感完全相同，说明该引擎只实现了其中一种。",
+                    color = palette.textSecondary,
+                    style = MaterialTheme.typography.labelSmall,
+                )
             }
         }
 
