@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">Slogan</string>
+
+    <string name="notification_channel_name">循环播报</string>
+    <string name="notification_channel_description">扩音器循环播放时常驻的通知</string>
+    <string name="notification_preparing">正在准备语音…</string>
+    <string name="notification_playing_count">第 %1$d / %2$d 轮</string>
+    <string name="notification_playing_infinite">无限循环 · 第 %1$d 轮</string>
+    <string name="notification_waiting">间隔 %1$.1f 秒</string>
+    <string name="notification_stop">停止</string>
+</resources>

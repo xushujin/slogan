@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!--
+      <adaptive-icon> 只能放在带 v26 限定符的目录里：即使 minSdk = 26，
+      aapt2 也不会把无版本限定的 mipmap-anydpi 识别为自适应图标。
+      这不是可清理的冗余目录，因此显式忽略该提示。
+    -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+</lint>
