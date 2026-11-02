@@ -2,6 +2,7 @@ package com.slogan.app
 
 import android.app.Application
 import android.content.Context
+import com.slogan.app.core.diagnostics.CrashRecorder
 import com.slogan.app.core.playback.AudioFocusManager
 import com.slogan.app.core.playback.PcmPlayer
 import com.slogan.app.core.playback.PlaybackEngine
@@ -82,6 +83,7 @@ class SloganApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashRecorder.install(this)
         container = AppContainer(this)
         container.warmUp()
     }

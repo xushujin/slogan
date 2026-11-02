@@ -45,6 +45,14 @@ class SpeechSynthesizer(context: Context) {
     @Volatile
     private var activeVoiceLabel: String? = null
 
+    /** 当前文本是否含中文，用于决定失败提示要不要提「换个中文音色」。 */
+    @Volatile
+    private var activeTextNeedsChinese: Boolean = false
+
+    /** 最近一次成功应用的具体音色；null 表示当前处于「系统默认」状态。 */
+    @Volatile
+    private var appliedVoiceName: String? = null
+
     /** 默认引擎包名，用于让缓存随引擎切换而失效。 */
     suspend fun engineSignature(): String = obtainEngine()?.defaultEngine ?: "unknown"
 
@@ -69,77 +77,121 @@ class SpeechSynthesizer(context: Context) {
                     requiresNetwork = voice.isNetworkConnectionRequired,
                 )
             }
-            .sortedWith(compareByDescending<VoiceOption> { it.localeTag.startsWith("zh") }.thenBy { it.label })
+            .sortedWith(
+                compareByDescending<VoiceOption> { TextScript.isChineseLocaleTag(it.localeTag) }
+                    .thenBy { it.label },
+            )
     }
 
     suspend fun synthesize(request: SpeechRequest, target: File) {
-        val tts = obtainEngine() ?: throw SpeechSynthesisException(
-            "系统语音引擎不可用。请先在系统设置中安装并启用「文字转语音」引擎。",
-        )
-        val voiceLabel = request.voiceName?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
         withContext(Dispatchers.Main.immediate) {
-            val applied = applyVoice(tts, request.voiceName)
-            // 中文文本配非中文音色，很多引擎会直接报错，个别厂商引擎甚至会在原生层崩掉。
-            // 与其把中文丢给英文音色，不如在合成前就给出可执行的提示。
-            if (applied != null &&
-                applied.locale.language != TextScript.CHINESE_LANGUAGE &&
-                TextScript.containsChinese(request.text)
-            ) {
-                throw SpeechSynthesisException(
-                    "音色「${applied.name.substringAfterLast('/')}」不是中文音色，无法朗读中文。" +
-                        "请改用中文音色或「系统默认」。",
-                )
-            }
-            tts.setSpeechRate(request.speechRate.coerceIn(0.5f, 2.0f))
-            tts.setPitch(request.pitch.coerceIn(0.5f, 2.0f))
-
-            target.parentFile?.mkdirs()
-            if (target.exists() && !target.delete()) {
-                throw SpeechSynthesisException("无法覆盖旧的合成文件：${target.absolutePath}")
-            }
-
-            val utteranceId = "slogan-${utteranceCounter.incrementAndGet()}"
-            val signal = CompletableDeferred<Unit>()
-            pendingUtterances[utteranceId] = signal
-            activeVoiceLabel = voiceLabel
-            val started = tts.synthesizeToFile(request.text, Bundle.EMPTY, target, utteranceId)
-            if (started != TextToSpeech.SUCCESS) {
-                pendingUtterances.remove(utteranceId)
-                activeVoiceLabel = null
-                throw SpeechSynthesisException("语音引擎拒绝了合成请求（错误码 $started）$voiceHint")
-            }
-
             try {
-                val finished = withTimeoutOrNull(SYNTHESIS_TIMEOUT_MS) {
-                    try {
-                        signal.await()
-                        Result.success(Unit)
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (error: Throwable) {
-                        Result.failure(error)
-                    }
-                }
-                when {
-                    finished == null -> throw SpeechSynthesisException("语音合成超时$voiceHint")
-                    finished.isFailure -> throw finished.exceptionOrNull()
-                        ?: SpeechSynthesisException("语音合成失败$voiceHint")
-                }
-            } finally {
-                pendingUtterances.remove(utteranceId)
-                activeVoiceLabel = null
+                synthesizeOnce(prepareEngine(request), request, target)
+            } catch (error: SpeechSynthesisException) {
+                // 「系统默认」在部分厂商引擎上根本用不了（默认音色不可合成）。
+                // 与其让用户卡在「默认播不了，又不知道该选哪个」，退到引擎第一个音色再试一次。
+                if (request.voiceName != null) throw error
+                val fallback = currentFirstVoiceName() ?: throw error
+                resetEngine()
+                val fresh = obtainEngine() ?: throw error
+                applyVoice(fresh, fallback)
+                appliedVoiceName = fallback
+                synthesizeOnce(fresh, request, target)
             }
         }
     }
 
-    fun shutdown() {
+    private suspend fun synthesizeOnce(tts: TextToSpeech, request: SpeechRequest, target: File) {
+        val voiceLabel = request.voiceName?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+        tts.setSpeechRate(request.speechRate.coerceIn(0.5f, 2.0f))
+        tts.setPitch(request.pitch.coerceIn(0.5f, 2.0f))
+
+        target.parentFile?.mkdirs()
+        if (target.exists() && !target.delete()) {
+            throw SpeechSynthesisException("无法覆盖旧的合成文件：${target.absolutePath}")
+        }
+
+        val utteranceId = "slogan-${utteranceCounter.incrementAndGet()}"
+        val signal = CompletableDeferred<Unit>()
+        pendingUtterances[utteranceId] = signal
+        activeVoiceLabel = voiceLabel
+        activeTextNeedsChinese = TextScript.containsChinese(request.text)
+        val started = tts.synthesizeToFile(request.text, Bundle.EMPTY, target, utteranceId)
+        if (started != TextToSpeech.SUCCESS) {
+            pendingUtterances.remove(utteranceId)
+            activeVoiceLabel = null
+            throw SpeechSynthesisException("语音引擎拒绝了合成请求（错误码 $started）$voiceHint")
+        }
+
+        try {
+            val finished = withTimeoutOrNull(SYNTHESIS_TIMEOUT_MS) {
+                try {
+                    signal.await()
+                    Result.success(Unit)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    Result.failure(error)
+                }
+            }
+            when {
+                finished == null -> throw SpeechSynthesisException("语音合成超时$voiceHint")
+                finished.isFailure -> throw finished.exceptionOrNull()
+                    ?: SpeechSynthesisException("语音合成失败$voiceHint")
+            }
+        } finally {
+            pendingUtterances.remove(utteranceId)
+            activeVoiceLabel = null
+        }
+    }
+
+    /**
+     * 准备引擎并应用音色。
+     *
+     * 关键点：`mParams` 里的 voice 一旦写入就没有公开 API 能清除，
+     * 所以「从具体音色切回系统默认」必须重建引擎，否则会一直念上一个音色。
+     */
+    private suspend fun prepareEngine(request: SpeechRequest): TextToSpeech {
+        val voiceName = request.voiceName
+        if (voiceName == null && appliedVoiceName != null) {
+            resetEngine()
+            appliedVoiceName = null
+        }
+
+        val tts = obtainEngine() ?: throw SpeechSynthesisException(
+            "系统语音引擎不可用。请先在系统设置中安装并启用「文字转语音」引擎。",
+        )
+
+        if (voiceName == null) {
+            // 系统默认：不设 voice，只确保引擎切到中文；设不了就直接说清楚。
+            if (TextScript.containsChinese(request.text)) {
+                val result = tts.setLanguage(Locale.SIMPLIFIED_CHINESE)
+                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    throw SpeechSynthesisException(
+                        "当前语音引擎没有中文语音数据，请在系统设置中安装中文语音包或更换引擎",
+                    )
+                }
+            }
+        } else {
+            applyVoice(tts, voiceName)
+            appliedVoiceName = voiceName
+        }
+        return tts
+    }
+
+    private fun currentFirstVoiceName(): String? =
+        runCatching { engine?.voices }.getOrNull()?.firstOrNull()?.name?.takeIf { it.isNotBlank() }
+
+    private fun resetEngine() {
         pendingUtterances.values.forEach { it.cancel() }
         pendingUtterances.clear()
-        engine?.stop()
-        engine?.shutdown()
+        runCatching { engine?.stop() }
+        runCatching { engine?.shutdown() }
         engine = null
         ready = false
     }
+
+    fun shutdown() = resetEngine()
 
     private suspend fun obtainEngine(): TextToSpeech? {
         engine?.let { if (ready) return it }
@@ -205,27 +257,10 @@ class SpeechSynthesizer(context: Context) {
         }
     }
 
-    /**
-     * 应用音色，返回实际生效的音色（系统默认时返回引擎默认音色）。
-     *
-     * **不能**用 `tts.voice = null` 表示「系统默认」：平台实现里 `setVoice` 会直接
-     * 对传入对象调用 `voice.getName()`，传 null 必然抛 NPE。要回到默认音色，
-     * 必须显式设置引擎给出的 `defaultVoice`。
-     *
-     * 设置结果也不再静默吞掉——`setVoice` 返回非 SUCCESS 时抛错，
-     * 否则会出现「选了音色但听起来没变」却毫无提示的情况。
-     */
-    private fun applyVoice(tts: TextToSpeech, voiceName: String?): Voice? {
+    private fun applyVoice(tts: TextToSpeech, voiceName: String) {
         val voices = runCatching { tts.voices }.getOrNull()
-
-        if (voiceName.isNullOrBlank()) {
-            val fallback = runCatching { tts.defaultVoice }.getOrNull() ?: return null
-            runCatching { tts.setVoice(fallback) }
-            return fallback
-        }
-
         // 引擎尚未给出音色列表时不做判断，交给后续合成流程报错。
-        if (voices == null) return null
+        if (voices == null) return
 
         val target = voices.firstOrNull { it.name == voiceName }
             ?: throw SpeechSynthesisException(
@@ -244,12 +279,15 @@ class SpeechSynthesizer(context: Context) {
                 "系统拒绝使用音色「${target.name.substringAfterLast('/')}」（错误码 $result）",
             )
         }
-        return target
     }
 
-    /** 非默认音色失败时补一句提示，避免用户对着英文音色反复试中文。 */
+    /** 非默认音色且文本含中文时补一句提示，避免用户对着英文音色反复试中文。 */
     private val voiceHint: String
-        get() = activeVoiceLabel?.let { "。当前音色「$it」可能与文本语言不匹配，请换一个音色" }.orEmpty()
+        get() {
+            if (!activeTextNeedsChinese) return ""
+            val label = activeVoiceLabel ?: return "。这段文字是中文，请确认所选音色支持中文"
+            return "。当前音色「$label」可能不支持中文，请换一个音色"
+        }
 
     private companion object {
         const val INIT_TIMEOUT_MS = 10_000L

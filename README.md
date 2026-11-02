@@ -23,7 +23,7 @@
 | 后台播放 | 前台服务 + 常驻通知 + 唤醒锁 + 音频焦点 |
 | 多套主题 | 石墨 / 靛夜 / 深海 / 苔绿 / 暖砂 / 樱粉，切换全局生效 |
 | 应用内更新 | 从 GitHub Releases 检查新版本，带下载进度、SHA-256 校验与签名比对，可直接拉起系统安装器 |
-| 关于页 | 应用名、版本号、技术栈、支持范围、权限说明 |
+| 关于页 | 应用名、版本号、技术栈、支持范围、权限说明、上次崩溃记录 |
 
 ### 应用内更新
 
@@ -54,19 +54,25 @@
 
 ### 音色与语言匹配
 
-系统 TTS 允许选择任意语言的音色，但用英文音色朗读中文时，多数引擎会直接报错，
-个别厂商引擎会在原生层崩溃（表现为「点开始播报就闪退」，Java 层拿不到堆栈）。
-因此在合成前做一次判定：
+系统 TTS 的音色由各家引擎自行注册，行为差异极大。真机上遇到过这些问题，
+所以这一块的实现原则是「不假设引擎是规范的」：
 
 | 处理 | 说明 |
 | --- | --- |
-| 中文文本 + 非中文音色 | 合成前直接拒绝，提示「请改用中文音色或系统默认」，不把中文交给英文引擎 |
-| 「系统默认」 | 不再用 `setVoice(null)` 表达——平台实现会对 null 调 `voice.getName()` 直接 NPE；改为显式设置引擎的 `defaultVoice` |
-| `setVoice` 返回值 | 不再被忽略。切换失败会明确报错，而不是静默沿用上一个音色 |
-| 音色列表 | 需联网的音色在名称后标注「（需联网）」 |
+| 「系统默认」 | 不设置 voice，只确保引擎切到中文。**绝不**用 `setVoice(null)` 表达——平台实现会对 null 调 `voice.getName()` 直接 NPE |
+| 切回系统默认 | `mParams` 里的 voice 一旦写入没有公开 API 能清除，因此必须**重建引擎**，否则会一直念上一个音色 |
+| 系统默认不可用 | 部分引擎的默认音色无法合成，失败后自动退到引擎第一个音色重试一次，而不是让用户卡死 |
+| `setVoice` 返回值 | 不忽略。切换失败明确报错，而不是静默沿用上一个音色 |
+| 音色列表 | 需联网的音色标注「（需联网）」 |
 
-其中「`setVoice` 返回值被忽略」正是「选了音色但听起来没变」的根因：
-旧实现用 `runCatching` 吞掉了失败，引擎回退到默认音色，界面却显示已选中。
+两个曾经踩过的坑：
+
+1. **`setVoice` 返回值被 `runCatching` 吞掉**——引擎拒绝切换时安静回退到默认音色，
+   界面却显示已选中，表现为「换了音色但声音没变」。
+2. **不能用 `Voice.locale` 判断是不是中文音色**。实测某厂商引擎把中文报成 `chn`
+   （标准里是奇努克混合语）、英文报成 `usa`，`toLanguageTag()` 直接输出这些非法值。
+   按 locale 判断会 100% 误判，所以现在只在「合成失败」时才给语言相关的提示，
+   不做事前拦截。排序上把 `zh/chn/chi/zho/cmn` 都当中文处理，纯粹为了让中文音色排在前面。
 
 
 ### 关键设计约束的落实方式
@@ -146,7 +152,7 @@ libraries and applications that depend on it to compile against version 37 or la
 │       │   ├── playback/              # PlaybackService（前台服务）
 │       │   └── ui/                    # 主题、拟态组件、四个页面、ViewModel
 │       ├── main/res/                  # 图标、通知图标、主题、备份规则、FileProvider 路径
-│       └── test/                      # 67 个 JVM 单测 + 真实 WAV / GitHub Release 夹具
+│       └── test/                      # 70 个 JVM 单测 + 真实 WAV / GitHub Release 夹具
 ├── gradle/libs.versions.toml
 └── README.md
 ```
@@ -167,7 +173,7 @@ libraries and applications that depend on it to compile against version 37 or la
 # Debug
 ./gradlew :app:assembleDebug
 
-# 单元测试（67 个）
+# 单元测试（70 个）
 ./gradlew :app:testDebugUnitTest
 
 # Lint（warningsAsErrors = true）
@@ -358,7 +364,7 @@ base64 -w0 slogan-release.jks
 
 Lint 首轮发现 6 个 error（`UnusedAttribute`、`DataExtractionRules`、`ObsoleteSdkInt`、`MonochromeLauncherIcon` ×2、`UseKtx`），已逐项修复；`ObsoleteSdkInt` 因自适应图标必须放在 `mipmap-anydpi-v26` 而在 `app/lint.xml` 中定点忽略。
 
-### 8.2 单元测试（67 个，全部通过）
+### 8.2 单元测试（70 个，全部通过）
 
 | 测试类 | 数量 | 覆盖内容 |
 | --- | --- | --- |
@@ -371,7 +377,7 @@ Lint 首轮发现 6 个 error（`UnusedAttribute`、`DataExtractionRules`、`Obs
 | `GitHubReleaseParserTest` | 10 | 真实 Release 响应夹具、资产选择、digest 解析、缺附件/缺 APK/非法 JSON/坏版本号报错 |
 | `ApkVerifierTest` | 5 | 真实文件 SHA-256 与系统 `shasum` 一致、空文件标准值、校验和大小写无关 |
 | `UpdateStateTest` | 3 | 下载进度比例、总字节未知、超范围钳制 |
-| `TextScriptTest` | 6 | 中文判定：纯中文、中英混排、纯英文/数字、纯标点、扩展 A 区、语言常量 |
+| `TextScriptTest` | 9 | 中文判定：纯中文、中英混排、纯英文/数字、纯标点、扩展 A 区、中文语言标签变体 |
 
 ### 8.3 真实文件验证（WAV）
 

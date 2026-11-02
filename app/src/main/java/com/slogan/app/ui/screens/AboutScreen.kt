@@ -17,11 +17,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.slogan.app.BuildConfig
+import com.slogan.app.core.diagnostics.CrashRecorder
 import com.slogan.app.ui.components.NeumorphicButton
 import com.slogan.app.ui.components.NeumorphicCard
 import com.slogan.app.ui.components.SectionLabel
@@ -167,6 +174,32 @@ fun AboutScreen(onBack: () -> Unit) {
             Spacer(modifier = Modifier.height(12.dp))
             InfoRow("包名", BuildConfig.APPLICATION_ID)
             InfoRow("构建类型", BuildConfig.BUILD_TYPE)
+        }
+
+        val context = LocalContext.current
+        var crashRecord by remember { mutableStateOf(CrashRecorder.lastCrash(context)) }
+        val record = crashRecord
+        if (record != null) {
+            NeumorphicCard(modifier = Modifier.fillMaxWidth()) {
+                SectionLabel(text = "上次崩溃记录")
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = record,
+                    color = palette.textSecondary,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 24,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                NeumorphicButton(
+                    onClick = {
+                        CrashRecorder.clear(context)
+                        crashRecord = null
+                    },
+                ) {
+                    Text(text = "清除记录", style = MaterialTheme.typography.labelLarge)
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(12.dp))

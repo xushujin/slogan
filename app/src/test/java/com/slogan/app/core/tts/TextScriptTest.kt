@@ -41,4 +41,26 @@ class TextScriptTest {
     fun `语言常量与平台 Locale 一致`() {
         assertEquals(Locale.CHINESE.language, TextScript.CHINESE_LANGUAGE)
     }
+
+    @Test
+    fun `标准中文标签识别为中文`() {
+        assertTrue(TextScript.isChineseLocaleTag("zh"))
+        assertTrue(TextScript.isChineseLocaleTag("zh-CN"))
+        assertTrue(TextScript.isChineseLocaleTag("ZH-Hans"))
+    }
+
+    @Test
+    fun `厂商引擎使用的变体标签也识别为中文`() {
+        // 真机上遇到的中文音色被报成 chn，英文被报成 usa
+        assertTrue(TextScript.isChineseLocaleTag("chn"))
+        assertTrue(TextScript.isChineseLocaleTag("cmn"))
+        assertTrue(TextScript.isChineseLocaleTag("zho"))
+    }
+
+    @Test
+    fun `英文与无效标签不识别为中文`() {
+        assertFalse(TextScript.isChineseLocaleTag("usa"))
+        assertFalse(TextScript.isChineseLocaleTag("en-US"))
+        assertFalse(TextScript.isChineseLocaleTag(""))
+    }
 }
