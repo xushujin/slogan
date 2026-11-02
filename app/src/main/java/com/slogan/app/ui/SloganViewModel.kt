@@ -8,9 +8,13 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.slogan.app.AppContainer
+import com.slogan.app.BuildConfig
 import com.slogan.app.core.playback.PlaybackRequest
 import com.slogan.app.core.playback.PlaybackState
 import com.slogan.app.core.tts.VoiceOption
+import com.slogan.app.core.update.ApkInstaller
+import com.slogan.app.core.update.InstallOutcome
+import com.slogan.app.core.update.UpdateState
 import com.slogan.app.domain.model.PlaybackSettings
 import com.slogan.app.domain.model.Preset
 import com.slogan.app.playback.PlaybackService
@@ -31,6 +35,8 @@ data class SloganUiState(
     val selectedPresetId: Long? = null,
     val ttsReady: Boolean = false,
     val cacheBytes: Long = 0L,
+    val update: UpdateState = UpdateState.Idle,
+    val currentVersion: String = BuildConfig.VERSION_NAME,
 ) {
     val isBusy: Boolean
         get() = playback.isBusy
@@ -66,23 +72,37 @@ class SloganViewModel(private val container: AppContainer) : ViewModel() {
         Base(text, settings, presets, playback, voiceList)
     }
 
-    val uiState: StateFlow<SloganUiState> = combine(
-        base,
+    /** 把「跨页面共享的一次性状态」收在一起，避免 combine 参数超过五个。 */
+    private data class Status(
+        val message: String?,
+        val selectedPresetId: Long?,
+        val ttsReady: Boolean,
+        val cacheBytes: Long,
+        val update: UpdateState,
+    )
+
+    private val status = combine(
         message,
         selectedPresetId,
         ttsReady,
         cacheBytes,
-    ) { current, currentMessage, presetId, ready, cache ->
+        container.updateManager.state,
+    ) { currentMessage, presetId, ready, cache, updateState ->
+        Status(currentMessage, presetId, ready, cache, updateState)
+    }
+
+    val uiState: StateFlow<SloganUiState> = combine(base, status) { current, extra ->
         SloganUiState(
             draft = current.draft,
             settings = current.settings,
             presets = current.presets,
             playback = current.playback,
             voices = current.voices,
-            message = currentMessage,
-            selectedPresetId = presetId,
-            ttsReady = ready,
-            cacheBytes = cache,
+            message = extra.message,
+            selectedPresetId = extra.selectedPresetId,
+            ttsReady = extra.ttsReady,
+            cacheBytes = extra.cacheBytes,
+            update = extra.update,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -230,6 +250,32 @@ class SloganViewModel(private val container: AppContainer) : ViewModel() {
             ttsReady.value = container.synthesizer.isReady()
             voices.value = container.synthesizer.availableVoices()
             cacheBytes.value = container.synthesisCache.totalSizeBytes()
+        }
+    }
+
+    fun checkForUpdate() = container.updateManager.check()
+
+    fun downloadUpdate() {
+        val release = when (val current = container.updateManager.state.value) {
+            is UpdateState.Available -> current.release
+            is UpdateState.Failed -> current.release
+            else -> null
+        }
+        if (release == null) {
+            showMessage("请先检查更新")
+            return
+        }
+        container.updateManager.download(release)
+    }
+
+    fun cancelUpdateDownload() = container.updateManager.cancel()
+
+    fun installUpdate() {
+        val ready = container.updateManager.state.value as? UpdateState.Ready ?: return
+        when (ApkInstaller.install(container.context, ready.file)) {
+            InstallOutcome.Started -> Unit
+            InstallOutcome.NeedPermission -> showMessage("请允许 Slogan 安装未知来源应用")
+            InstallOutcome.Failed -> showMessage("无法启动系统安装程序")
         }
     }
 

@@ -175,4 +175,6 @@ dependencies {
     testImplementation(libs.junit)
     // 仅用于在 JVM 上执行真实的 SQLite 迁移验证，不进入 App 运行时。
     testImplementation(libs.sqlite.jdbc)
+    // 运行时用的是 Android 平台的 org.json；JVM 单测需要真实实现才能解析 Release JSON。
+    testImplementation(libs.org.json)
 }

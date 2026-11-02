@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 只暴露下载目录给 FileProvider，其余应用私有路径不对外授权 -->
+<paths>
+    <cache-path name="updates" path="updates/" />
+</paths>

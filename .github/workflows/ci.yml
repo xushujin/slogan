@@ -1,8 +1,10 @@
 name: CI
 
+# 触发策略：构建只认 tag。
+# - 推送 main 不触发任何工作流（日常提交不消耗 Actions 额度）
+# - Pull Request 只做校验（单测 + Lint），不产出 APK
+# - 打 v* 标签的完整构建、签名与发布由 release.yml 负责
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -16,7 +18,7 @@ permissions:
 
 jobs:
   verify:
-    name: Build / Test / Lint
+    name: Test / Lint
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -43,9 +45,6 @@ jobs:
 
       - name: Lint (warnings are errors)
         run: ./gradlew lintDebug --console=plain --stacktrace
-
-      - name: Assemble debug APK
-        run: ./gradlew assembleDebug --console=plain --stacktrace
 
       - name: Upload test and lint reports
         if: always()

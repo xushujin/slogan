@@ -8,6 +8,7 @@ import com.slogan.app.core.playback.PlaybackEngine
 import com.slogan.app.core.playback.PlaybackState
 import com.slogan.app.core.tts.SpeechSynthesizer
 import com.slogan.app.core.tts.SynthesisCache
+import com.slogan.app.core.update.UpdateManager
 import com.slogan.app.data.PresetDao
 import com.slogan.app.data.SettingsStore
 import com.slogan.app.data.SloganDatabase
@@ -38,6 +39,18 @@ class AppContainer(context: Context) {
     val synthesisCache: SynthesisCache = SynthesisCache(appContext, cacheDao) { synthesizer.engineSignature() }
 
     private val playbackState = MutableStateFlow<PlaybackState>(PlaybackState.Idle)
+
+    /**
+     * 更新比较用的基准版本。
+     * debug 构建的 versionName 带 `-debug` 后缀（见 build.gradle.kts），
+     * 去掉后才能与 GitHub 标签（`v1.0.0`）正确比较。
+     */
+    private val updateBaseVersion: String = BuildConfig.VERSION_NAME.removeSuffix("-debug")
+
+    val updateManager: UpdateManager = UpdateManager(
+        context = appContext,
+        currentVersion = updateBaseVersion,
+    )
 
     val playbackEngine: PlaybackEngine by lazy {
         PlaybackEngine(

@@ -105,6 +105,7 @@ fun AboutScreen(onBack: () -> Unit) {
             InfoRow("音频处理", "自研 WAV 编解码 · 峰值归一化 / 软限幅")
             InfoRow("播放", "AudioTrack 单实例循环，无第三方播放器")
             InfoRow("存储", "原生 SQLite，显式版本迁移")
+            InfoRow("更新", "GitHub Releases · 自研下载与签名校验")
             InfoRow("架构", "单 Activity · 手写依赖容器，无 DI 框架")
         }
 
@@ -145,9 +146,17 @@ fun AboutScreen(onBack: () -> Unit) {
                 title = "查询 TTS 引擎",
                 detail = "Android 11 起需要声明包可见性，才能发现并调用系统语音引擎。",
             )
+            PermissionRow(
+                title = "网络",
+                detail = "仅在你点击「检查更新」时访问 api.github.com 与 GitHub 下载地址，用于获取版本信息与安装包；应用不做任何统计上报。",
+            )
+            PermissionRow(
+                title = "安装未知来源应用",
+                detail = "下载完新版本后拉起系统安装器需要此授权。Android 8.0 起按应用授权，首次安装时系统会跳转到设置页由你确认。",
+            )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "本应用不申请网络权限；语音合成由系统语音引擎在本地或其自身服务中完成。",
+                text = "语音合成由系统语音引擎完成，不经过本应用的网络请求。应用不会在后台自动联网，只有点击「检查更新」才会发起请求。",
                 color = palette.textSecondary,
                 style = MaterialTheme.typography.bodyMedium,
             )

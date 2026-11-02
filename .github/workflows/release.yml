@@ -1,5 +1,7 @@
 name: Release
 
+# 全仓库唯一会构建 APK 的工作流：只有推送 v* 标签才触发。
+# 推送 main 不触发任何工作流；PR 只跑 ci.yml 的单测与 Lint。
 on:
   push:
     tags:
@@ -65,6 +67,9 @@ jobs:
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --console=plain --stacktrace
 
+      - name: Lint (warnings are errors)
+        run: ./gradlew lintDebug --console=plain --stacktrace
+
       - name: Build signed release
         env:
           SLOGAN_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
@@ -89,7 +94,14 @@ jobs:
         run: |
           cp app/build/outputs/apk/release/app-release.apk "$APK_NAME"
           sha256sum "$APK_NAME" > "$APK_NAME.sha256"
-          cp app/build/outputs/mapping/release/mapping.txt "mapping-$VERSION_NAME.txt"
+
+          # R8 的 mapping.txt 是纯文本，未压缩可达 20 MB 以上；
+          # -n 去掉文件名与时间戳，让同样的映射产出同样的字节，便于校验。
+          gzip -9 -n -c app/build/outputs/mapping/release/mapping.txt > "mapping-$VERSION_NAME.txt.gz"
+          gzip -t "mapping-$VERSION_NAME.txt.gz"
+
+          echo "APK:      $(du -h "$APK_NAME" | cut -f1)"
+          echo "Mapping:  $(du -h "mapping-$VERSION_NAME.txt.gz" | cut -f1) (压缩后)"
 
       - name: Publish GitHub Release
         env:
@@ -98,6 +110,6 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "$APK_NAME" \
             "$APK_NAME.sha256" \
-            "mapping-$VERSION_NAME.txt" \
+            "mapping-$VERSION_NAME.txt.gz" \
             --title "Slogan $VERSION_NAME" \
             --generate-notes

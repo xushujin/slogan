@@ -165,6 +165,10 @@ private fun SloganRoot(state: SloganUiState, viewModel: SloganViewModel) {
                             onBoostChange = viewModel::setBoost,
                             onClearCache = viewModel::clearCache,
                             onAboutClick = { showAbout = true },
+                            onCheckUpdate = viewModel::checkForUpdate,
+                            onDownloadUpdate = viewModel::downloadUpdate,
+                            onCancelUpdate = viewModel::cancelUpdateDownload,
+                            onInstallUpdate = viewModel::installUpdate,
                         )
                     }
                 }

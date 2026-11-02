@@ -51,6 +51,10 @@ fun SettingsScreen(
     onBoostChange: (Boolean) -> Unit,
     onClearCache: () -> Unit,
     onAboutClick: () -> Unit,
+    onCheckUpdate: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onCancelUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
 ) {
     val palette = LocalSloganPalette.current
     val settings = state.settings
@@ -156,6 +160,15 @@ fun SettingsScreen(
                 }
             }
         }
+
+        UpdateCard(
+            state = state.update,
+            currentVersion = state.currentVersion,
+            onCheck = onCheckUpdate,
+            onDownload = onDownloadUpdate,
+            onCancel = onCancelUpdate,
+            onInstall = onInstallUpdate,
+        )
 
         NeumorphicCard(modifier = Modifier.fillMaxWidth()) {
             val interaction = remember { MutableInteractionSource() }

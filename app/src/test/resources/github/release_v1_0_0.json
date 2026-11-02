@@ -1,0 +1,93 @@
+{
+  "url": "https://api.github.com/repos/xushujin/slogan/releases/123456789",
+  "assets_url": "https://api.github.com/repos/xushujin/slogan/releases/123456789/assets",
+  "upload_url": "https://uploads.github.com/repos/xushujin/slogan/releases/123456789/assets{?name,label}",
+  "html_url": "https://github.com/xushujin/slogan/releases/tag/v1.0.0",
+  "id": 123456789,
+  "author": {
+    "login": "xushujin",
+    "id": 5311716,
+    "node_id": "MDQ6VXNlcjUzMTE3MTY=",
+    "avatar_url": "https://avatars.githubusercontent.com/u/5311716?v=4",
+    "type": "User",
+    "site_admin": false
+  },
+  "node_id": "RE_kwDORWvK1c4HTlq1",
+  "tag_name": "v1.0.0",
+  "target_commitish": "main",
+  "name": "Slogan 1.0.0",
+  "draft": false,
+  "immutable": false,
+  "prerelease": false,
+  "created_at": "2026-11-02T03:57:58Z",
+  "updated_at": "2026-11-02T03:59:49Z",
+  "published_at": "2026-11-02T03:59:47Z",
+  "assets": [
+    {
+      "url": "https://api.github.com/repos/xushujin/slogan/releases/assets/300000001",
+      "id": 300000001,
+      "node_id": "RA_kwDORWvK1c4R39YB",
+      "name": "mapping-1.0.0.txt",
+      "label": "",
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282,
+        "type": "Bot",
+        "site_admin": false
+      },
+      "content_type": "text/plain; charset=utf-8",
+      "state": "uploaded",
+      "size": 25489011,
+      "digest": "sha256:002c26997a53c5be67ef8bcde04ee968e322255c64930c32700f7e9fa734441e",
+      "download_count": 0,
+      "created_at": "2026-11-02T03:59:47Z",
+      "updated_at": "2026-11-02T03:59:47Z",
+      "browser_download_url": "https://github.com/xushujin/slogan/releases/download/v1.0.0/mapping-1.0.0.txt"
+    },
+    {
+      "url": "https://api.github.com/repos/xushujin/slogan/releases/assets/300000002",
+      "id": 300000002,
+      "node_id": "RA_kwDORWvK1c4R39YC",
+      "name": "Slogan-1.0.0.apk",
+      "label": "",
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282,
+        "type": "Bot",
+        "site_admin": false
+      },
+      "content_type": "application/vnd.android.package-archive",
+      "state": "uploaded",
+      "size": 1185106,
+      "digest": "sha256:e2318e10d4b804a2ff02ff2221e7fa76298089615aef3ad734e274d7b7287d30",
+      "download_count": 3,
+      "created_at": "2026-11-02T03:59:47Z",
+      "updated_at": "2026-11-02T03:59:47Z",
+      "browser_download_url": "https://github.com/xushujin/slogan/releases/download/v1.0.0/Slogan-1.0.0.apk"
+    },
+    {
+      "url": "https://api.github.com/repos/xushujin/slogan/releases/assets/300000003",
+      "id": 300000003,
+      "node_id": "RA_kwDORWvK1c4R39YD",
+      "name": "Slogan-1.0.0.apk.sha256",
+      "label": "",
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282,
+        "type": "Bot",
+        "site_admin": false
+      },
+      "content_type": "text/plain; charset=utf-8",
+      "state": "uploaded",
+      "size": 83,
+      "digest": "sha256:7731c10c96f9b72374cc304830b6dd4633c74e889bfd5d6fecc8118cc21310f1",
+      "download_count": 0,
+      "created_at": "2026-11-02T03:59:47Z",
+      "updated_at": "2026-11-02T03:59:47Z",
+      "browser_download_url": "https://github.com/xushujin/slogan/releases/download/v1.0.0/Slogan-1.0.0.apk.sha256"
+    }
+  ],
+  "tarball_url": "https://api.github.com/repos/xushujin/slogan/tarball/v1.0.0",
+  "zipball_url": "https://api.github.com/repos/xushujin/slogan/zipball/v1.0.0",
+  "body": "## What's Changed\n* feat: 初始化 Slogan 扩音器应用 by @xushujin in https://github.com/xushujin/slogan/pull/1\n\n\n**Full Changelog**: https://github.com/xushujin/slogan/commits/v1.0.0"
+}

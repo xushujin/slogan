@@ -22,7 +22,36 @@
 | 记录复用 | 保存多条播报记录，支持载入编辑、直接播放、删除 |
 | 后台播放 | 前台服务 + 常驻通知 + 唤醒锁 + 音频焦点 |
 | 多套主题 | 石墨 / 靛夜 / 深海 / 苔绿 / 暖砂 / 樱粉，切换全局生效 |
+| 应用内更新 | 从 GitHub Releases 检查新版本，带下载进度、SHA-256 校验与签名比对，可直接拉起系统安装器 |
 | 关于页 | 应用名、版本号、技术栈、支持范围、权限说明 |
+
+### 应用内更新
+
+更新源是 GitHub Releases，不依赖任何第三方更新 SDK。
+
+| 环节 | 实现 |
+| --- | --- |
+| 检查 | `GET https://api.github.com/repos/xushujin/slogan/releases/latest`，用 `tag_name` 与 `BuildConfig.VERSION_NAME` 做语义化版本比较 |
+| 下载 | `HttpURLConnection` 流式写入 `cacheDir/updates/*.part`，按 80ms 节流上报进度，完成后改名为正式文件 |
+| 校验 | 优先用资产自带的 `digest`（`sha256:...`），没有才下载同名 `.sha256` 附件；再比对安装包与当前应用的包名、签名 |
+| 安装 | `FileProvider` 授予读权限，`ACTION_VIEW` 拉起系统安装器；未授权时跳转「安装未知应用」设置页 |
+
+状态机 `UpdateState` 共七种：`Idle / Checking / UpToDate / Available / Downloading / Ready / Failed`。
+每个状态只给一个主操作，不存在「检查中还能点下载」这类自相矛盾的入口；取消下载会退回
+`Available`，可以直接重试而不必重新检查。
+
+三点值得单独说明：
+
+1. **签名比对是真正的安全边界。** 校验和只能发现下载损坏——它和 APK 来自同一个源，
+   挡不住有人替换发布内容。真正拦住「同包名但非本应用签名的 APK」的是
+   `getPackageArchiveInfo` 取出的签名与已安装应用签名求交集，为空就拒绝。
+2. **关闭 gzip。** 请求带 `Accept-Encoding: identity`，否则 `Content-Length` 是压缩后长度、
+   读到的却是解压后字节，进度条会超过 100%。
+3. **不做后台自动检查。** 只有用户点击「检查更新」才会联网，关于页的权限说明据此撰写。
+
+已知限制：debug 构建的包名是 `com.slogan.app.debug`、签名也是 debug key，
+因此**调试版无法通过应用内更新安装正式版**，校验会明确提示包名或签名不一致。
+
 
 ### 关键设计约束的落实方式
 
@@ -70,8 +99,10 @@ libraries and applications that depend on it to compile against version 37 or la
 ### 依赖边界
 
 - 运行时依赖只有 AndroidX 官方库（Compose、Core、Lifecycle），**没有**第三方 UI 库、图片库、播放器、DI 框架。
-- WAV 解析/写入、响度处理、AudioTrack 播放循环、拟态绘制、图标、SQLite 访问全部自己实现。
-- `sqlite-jdbc` 只用于 JVM 单元测试里执行真实迁移 SQL，不会进入 APK。
+- WAV 解析/写入、响度处理、AudioTrack 播放循环、拟态绘制、图标、SQLite 访问、HTTP 下载全部自己实现。
+- JSON 解析用 Android 平台自带的 `org.json`，不额外引入解析库。
+- `sqlite-jdbc` 与 `org.json:json` 只用于 JVM 单元测试，不会进入 APK：
+  前者执行真实迁移 SQL，后者提供 `org.json` 的真实实现（Android 的 `android.jar` 里是抛异常的桩）。
 
 ---
 
@@ -80,8 +111,8 @@ libraries and applications that depend on it to compile against version 37 or la
 ```
 .
 ├── .github/workflows/
-│   ├── ci.yml                 # push/PR：单测 + Lint + Debug 构建
-│   └── release.yml            # push tag v*：签名构建 + 校验 + 发布 Release
+│   ├── ci.yml                 # PR/手动：单测 + Lint（不产出 APK）
+│   └── release.yml            # push tag v*：单测 + Lint + 签名构建 + 发布 Release
 ├── app/
 │   ├── build.gradle.kts       # 签名双通道、版本注入、零警告配置
 │   ├── lint.xml               # 仅忽略自适应图标目录的 ObsoleteSdkInt
@@ -93,12 +124,13 @@ libraries and applications that depend on it to compile against version 37 or la
 │       │   ├── core/audio/            # WavCodec / PcmAudio / LoudnessProcessor
 │       │   ├── core/playback/         # PlaybackEngine / PcmPlayer / 时间轴 / 音频焦点
 │       │   ├── core/tts/              # SpeechSynthesizer / SynthesisCache / 缓存键
+│       │   ├── core/update/           # 版本比较 / Release 解析 / 下载 / 校验 / 安装
 │       │   ├── data/                  # SloganSchema / SloganDatabase / DAO / SettingsStore
 │       │   ├── domain/model/          # Preset / PlaybackSettings
 │       │   ├── playback/              # PlaybackService（前台服务）
 │       │   └── ui/                    # 主题、拟态组件、四个页面、ViewModel
-│       ├── main/res/                  # 图标、通知图标、主题、备份规则
-│       └── test/                      # 33 个 JVM 单测 + 真实 WAV 资源
+│       ├── main/res/                  # 图标、通知图标、主题、备份规则、FileProvider 路径
+│       └── test/                      # 61 个 JVM 单测 + 真实 WAV / GitHub Release 夹具
 ├── gradle/libs.versions.toml
 └── README.md
 ```
@@ -119,7 +151,7 @@ libraries and applications that depend on it to compile against version 37 or la
 # Debug
 ./gradlew :app:assembleDebug
 
-# 单元测试（33 个）
+# 单元测试（61 个）
 ./gradlew :app:testDebugUnitTest
 
 # Lint（warningsAsErrors = true）
@@ -213,18 +245,48 @@ main ──●────────●────────────●
 ```
 
 1. 从 `main` 切功能分支（`feat/`、`fix/`、`chore/`）。
-2. 提交 PR 到 `main`，CI 自动跑单测、Lint、Debug 构建。
+2. 提交 PR 到 `main`，`ci.yml` 跑单测与 Lint（不产出 APK）。
 3. Review 合并后，在 `main` 上打标签并推送：
    ```bash
    git tag -a v1.2.3 -m "Slogan 1.2.3"
    git push origin v1.2.3
    ```
-4. `release.yml` 触发：
+4. `release.yml` 触发（**这是唯一会构建 APK 的地方**）：
    - 校验标签格式（`v1.2.3` 或 `v1.2.3-rc1`）
+   - 单测 + Lint（警告即错误）
    - `versionName = 标签去掉 v`，`versionCode = github.run_number`
    - 解码 keystore → 签名构建 → `apksigner verify` → 校验 mapping
-   - 生成 `Slogan-<version>.apk`、`.sha256`、`mapping-<version>.txt`
+   - 生成 `Slogan-<version>.apk`、`.sha256`、`mapping-<version>.txt.gz`
    - `gh release create` 自动发布 Release
+
+### 触发策略：构建只认 tag
+
+| 事件 | 是否触发 | 跑什么 |
+| --- | --- | --- |
+| 推送 `main` | **否** | 什么都不跑 |
+| Pull Request → `main` | 是 | 单测 + Lint |
+| 手动 `workflow_dispatch` | 是 | 单测 + Lint |
+| 推送 `v*` 标签 | 是 | 单测 + Lint + 签名构建 + 发布 Release |
+
+推送 `main` 不触发任何工作流，所以合并代码后不会自动产出 APK——**要出包必须打 tag**。
+相应地，资源合并、R8 混淆这类只在打包阶段暴露的问题不会在 PR 阶段被拦截，
+发版前建议本地先跑一次 `./gradlew assembleRelease`。
+
+### 为什么 mapping 要压缩后再发布
+
+R8 的 `mapping.txt` 是纯文本，每一行都带完整类名与方法签名。本项目 release 产出的
+`mapping.txt` 约 24 MB、19.9 万行——相对于 1.1 MB 的 APK 显得很夸张，但这是 R8
+重命名了全部依赖（Compose、Kotlin、AndroidX）后的正常体量，不是配置写错了。
+
+文本重复度极高，`gzip -9` 后约 1.7 MB（约为原始体积的 7%）。所以 `release.yml`
+在上传前统一压成 `mapping-<version>.txt.gz`，并用 `gzip -t` 校验压缩包完整性。
+
+解压还原崩溃栈：
+
+```bash
+gunzip -c mapping-1.0.0.txt.gz > mapping.txt
+# 再把 mapping.txt 交给 Google Play / Firebase / retrace 还原堆栈
+```
 
 版本号规则：
 
@@ -280,7 +342,7 @@ base64 -w0 slogan-release.jks
 
 Lint 首轮发现 6 个 error（`UnusedAttribute`、`DataExtractionRules`、`ObsoleteSdkInt`、`MonochromeLauncherIcon` ×2、`UseKtx`），已逐项修复；`ObsoleteSdkInt` 因自适应图标必须放在 `mipmap-anydpi-v26` 而在 `app/lint.xml` 中定点忽略。
 
-### 8.2 单元测试（33 个，全部通过）
+### 8.2 单元测试（61 个，全部通过）
 
 | 测试类 | 数量 | 覆盖内容 |
 | --- | --- | --- |
@@ -289,6 +351,10 @@ Lint 首轮发现 6 个 error（`UnusedAttribute`、`DataExtractionRules`、`Obs
 | `PlaybackTimelineTest` | 5 | 总时长、最后一轮无间隔、单次播放、无限循环、零间隔 |
 | `SynthesisKeyTest` | 6 | 键稳定性、文本/音色/语速/音调/引擎变化必须换键 |
 | `DatabaseMigrationTest` | 7 | v1 数据保留、迁移后 schema 与全新安装一致、默认值、非破坏性、拒绝降级、缺迁移报错 |
+| `VersionNameTest` | 10 | `v` 前缀、预发布标识、构建元数据忽略、非法输入、逐段比较、semver 预发布优先级 |
+| `GitHubReleaseParserTest` | 10 | 真实 Release 响应夹具、资产选择、digest 解析、缺附件/缺 APK/非法 JSON/坏版本号报错 |
+| `ApkVerifierTest` | 5 | 真实文件 SHA-256 与系统 `shasum` 一致、空文件标准值、校验和大小写无关 |
+| `UpdateStateTest` | 3 | 下载进度比例、总字节未知、超范围钳制 |
 
 ### 8.3 真实文件验证（WAV）
 
@@ -334,6 +400,22 @@ aapt2 dump xmltree --file AndroidManifest.xml app-release.apk
 | 不同 TTS 引擎的 WAV 输出 | 仅支持 16 bit 线性 PCM WAV；若某引擎输出 float/8 bit/非 WAV，会抛出明确错误而不是静默播放失败 |
 | 实际扩音响度 | 取决于设备扬声器功率、系统音效与媒体音量，代码只保证不削顶、平均响度尽量高 |
 | 音频输出路由 | 走系统媒体通道；连接耳机/蓝牙时会从对应设备播放，不会强制切回扬声器（强制切换需要 `MODE_IN_COMMUNICATION`，会显著改变音质且难以在无设备环境下验证） |
+| 应用内更新端到端 | **未执行**。检查/下载/校验/安装全链路只做了单元测试与二进制验证（见 8.6），没有真机跑过实际安装。首次在真机验证时重点看：下载进度是否平滑、`FileProvider` 授权是否被系统接受、未知来源授权跳转是否落到本应用 |
+| GitHub API 限流 | 未认证请求每小时 60 次。个人使用足够；若频繁点击「检查更新」会收到 403，界面提示「访问过于频繁，请稍后再试」 |
+
+### 8.6 更新链路的验证边界
+
+| 环节 | 验证方式 | 结论 |
+| --- | --- | --- |
+| 版本比较 | 10 个单测覆盖 `v` 前缀、预发布、逐段比较 | 通过 |
+| Release 解析 | 用真实 v1.0.0 发布的结构化夹具（资产名/字节数/digest 均与线上一致） | 通过 |
+| SHA-256 计算 | 对真实 WAV 文件计算，与系统 `shasum -a 256` 逐位比对 | 通过 |
+| 进度计算 | 单测覆盖比例、总字节未知、越界钳制 | 通过 |
+| HTTP 抓取 | **未在本机执行**——GitHub API 对本机出口 IP 限流，无法取到 200 响应 | 未验证 |
+| 签名比对 / 安装跳转 | 依赖 `PackageManager` 与系统安装器，JVM 单测无法覆盖 | 未验证 |
+
+`UpdateClient`、`ApkDownloader`、`ApkInstaller` 的失败路径都收敛为可读中文提示，
+网络异常不会让界面停在「下载中」不动。
 
 ---
 
@@ -345,8 +427,11 @@ aapt2 dump xmltree --file AndroidManifest.xml app-release.apk
 | `FOREGROUND_SERVICE_MEDIA_PLAYBACK` | Android 14+ 声明前台服务类型 |
 | `POST_NOTIFICATIONS` | Android 13+ 展示常驻播放通知（拒绝仍可播放，但通知栏不可见） |
 | `WAKE_LOCK` | 播放期间防止息屏休眠中断循环 |
+| `INTERNET` | 仅在用户点击「检查更新」时访问 GitHub API 与下载地址 |
+| `REQUEST_INSTALL_PACKAGES` | 下载完成后拉起系统安装器覆盖安装 |
 
-不申请 `INTERNET`：语音合成由系统 TTS 引擎负责，本应用只写本地文件、读本地文件、驱动 AudioTrack。
+网络权限只服务于应用内更新：应用不做任何统计上报，也不会在后台自动联网。
+语音合成由系统 TTS 引擎负责，不经过本应用的网络请求。
 
 支持范围：Android 8.0（API 26）至 Android 16（API 36）。需要系统安装可用的「文字转语音」引擎。
 
@@ -369,5 +454,6 @@ aapt2 dump xmltree --file AndroidManifest.xml app-release.apk
 | 拟态 UI | `ui/components/Neumorphic.kt`、`ui/components/Inputs.kt`、`ui/components/SloganIcon.kt` |
 | 多主题 | `ui/theme/SloganPalette.kt`、`ui/theme/SloganTheme.kt` |
 | 关于页 | `ui/screens/AboutScreen.kt` |
+| 应用内更新 | `core/update/`（检查 / 下载 / 校验 / 安装）、`ui/screens/UpdateCard.kt` |
 | 签名双通道 | `app/build.gradle.kts`、`.github/workflows/release.yml` |
 | 零警告 | `app/build.gradle.kts`、`app/lint.xml` |
