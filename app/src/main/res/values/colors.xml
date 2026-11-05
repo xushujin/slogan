@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="window_background">#1A1C20</color>
-    <color name="ic_launcher_background">#22252B</color>
+    <!-- 图标底色：暖灰哑光，与前景主体同色系，靠明度差分层 -->
+    <color name="ic_launcher_background">#C4BEB4</color>
 </resources>

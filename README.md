@@ -82,6 +82,23 @@
    不做事前拦截。排序上把 `zh/chn/chi/zho/cmn` 都当中文处理，纯粹为了让中文音色排在前面。
 
 
+### 启动图标
+
+柔光拟态风格，和界面同一套语言：单一光源（左上）、哑光、近乎单色，体积全靠
+模糊遮罩的偏移叠加塑造，不描边、不分割、不发光。
+
+生成脚本在 `tools/make_icon.py`，输出 `mipmap-*/ic_launcher_foreground.png`
+（透明底，供 adaptive-icon 前景层）与 `ic_launcher_monochrome.png`（Android 13+ 主题图标）。
+
+设计上踩过的两个坑，都写在脚本注释里：
+
+1. **喇叭口必须是凸出的椭圆边。** 用直边收口时，轮廓会被读成旗子、箭头甚至鼠标指针——
+   试了三版才定下来。做法是「梯形 + 两端椭圆求并集」，让轮廓自然收成圆边。
+2. **拟态最容易翻车的地方是缩到 48px 糊成一团。** 第一版主体与底色只差 5% 明度，
+   在 48px 下完全认不出。最终把明度差拉到约 12%，轮廓也放大到接近安全区边界。
+
+安全区按 66dp 直径控制，手柄底端距圆心 31.8dp，圆形遮罩下不会被切。
+
 ### 关键设计约束的落实方式
 
 | 需求 | 实现 |
@@ -154,12 +171,14 @@ libraries and applications that depend on it to compile against version 37 or la
 │       │   ├── core/playback/         # PlaybackEngine / PcmPlayer / 时间轴 / 音频焦点
 │       │   ├── core/tts/              # SpeechSynthesizer / SynthesisCache / 缓存键
 │       │   ├── core/update/           # 版本比较 / Release 解析 / 下载 / 校验 / 安装
+│       │   ├── core/diagnostics/      # CrashRecorder（Java 层崩溃记录）
 │       │   ├── data/                  # SloganSchema / SloganDatabase / DAO / SettingsStore
 │       │   ├── domain/model/          # Preset / PlaybackSettings
 │       │   ├── playback/              # PlaybackService（前台服务）
 │       │   └── ui/                    # 主题、拟态组件、四个页面、ViewModel
-│       ├── main/res/                  # 图标、通知图标、主题、备份规则、FileProvider 路径
+│       ├── main/res/                  # mipmap-* 图标、通知图标、主题、备份规则、FileProvider 路径
 │       └── test/                      # 70 个 JVM 单测 + 真实 WAV / GitHub Release 夹具
+├── tools/make_icon.py         # 启动图标生成脚本（PIL 绘制，可重跑）
 ├── gradle/libs.versions.toml
 └── README.md
 ```
@@ -484,6 +503,7 @@ aapt2 dump xmltree --file AndroidManifest.xml app-release.apk
 | 记录保存 | `data/PresetDao.kt`、`ui/screens/PresetsScreen.kt` |
 | 显式迁移 | `data/SloganSchema.kt`、`data/SloganDatabase.kt` |
 | 拟态 UI | `ui/components/Neumorphic.kt`、`ui/components/Inputs.kt`、`ui/components/SloganIcon.kt` |
+| 启动图标 | `tools/make_icon.py`、`res/mipmap-*/ic_launcher_*.png` |
 | 多主题 | `ui/theme/SloganPalette.kt`、`ui/theme/SloganTheme.kt` |
 | 关于页 | `ui/screens/AboutScreen.kt` |
 | 应用内更新 | `core/update/`（检查 / 下载 / 校验 / 安装）、`ui/screens/UpdateCard.kt` |
